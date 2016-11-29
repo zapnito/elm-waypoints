@@ -137,31 +137,25 @@ updateElementStatuses router enteredViewSubs elementStatuses =
                 |> Maybe.withDefault []
 
         updatedElementStatuses =
-            enteredViewSubs
-                |> Dict.keys
-                |> List.foldl
-                    (\elementId statuses -> statuses |> Dict.insert elementId (visibilityOf elementId))
-                    Dict.empty
+            List.foldl
+                (\elementId statuses -> statuses |> Dict.insert elementId (visibilityOf elementId))
+                Dict.empty
+                (Dict.keys enteredViewSubs)
 
-        callbackEffects =
-            updatedElementStatuses
-                |> Dict.foldl
-                    (\elementId updatedElementStatus taskChain ->
-                        case ( elementStatuses |> Dict.get elementId, updatedElementStatus ) of
-                            ( Just Visible, Visible ) ->
-                                taskChain
+        chainCallbackEffects elementId updatedElementStatus taskChain =
+            case ( elementStatuses |> Dict.get elementId, updatedElementStatus ) of
+                ( Just Visible, Visible ) ->
+                    taskChain
 
-                            ( _, Visible ) ->
-                                taskChain
-                                    |> Task.andThen (always <| elementCallbackEffects router (taggersFor elementId))
+                ( _, Visible ) ->
+                    taskChain
+                        |> Task.andThen (always <| sendAllToApp router (taggersFor elementId))
 
-                            _ ->
-                                taskChain
-                    )
-                    (Task.succeed ())
+                _ ->
+                    taskChain
     in
         ( updatedElementStatuses
-        , callbackEffects
+        , Dict.foldl chainCallbackEffects (Task.succeed ()) updatedElementStatuses
         )
 
 
@@ -181,10 +175,8 @@ visibilityOf elementId =
                 NotFound
 
 
-elementCallbackEffects router elementTaggers =
-    elementTaggers
-        |> List.foldl
-            (\tagger taskChain ->
-                taskChain |> Task.andThen (always <| Platform.sendToApp router tagger)
-            )
-            (Task.succeed ())
+sendAllToApp router taggers =
+    taggers
+        |> List.map (Platform.sendToApp router)
+        |> Task.sequence
+        |> Task.map (always ())

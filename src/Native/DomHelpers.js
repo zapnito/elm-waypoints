@@ -17,5 +17,12 @@ var _zapnito$elm_waypoints$Native_DomHelpers = {
 
             return function() {};
         });
+    },
+
+    scrollPosition: function() {
+        return {
+            x: document.defaultView.scrollX,
+            y: document.defaultView.scrollY
+        }
     }
 }

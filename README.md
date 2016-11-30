@@ -17,16 +17,23 @@ As this is an effect manager and uses native code it isn't available at http://p
 
 ```
 type Msg =
-    WaypointEnteredView String
+    WaypointTriggered String
 
 update msg model =
     case msg of
-        WaypointEnteredView waypointName ->
+        WaypointTriggered message ->
             ...
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Waypoints.enteredView "element1" (WaypointEnteredView "waypoint1")
+    Sub.batch
+        [ Waypoints.enteredTop "element1" (WaypointTigger "element entered top of window")
+        , Waypoints.exitedTop "element1" (WaypointTigger "element exited top of window")
+        , Waypoints.crossedTop "element1" (WaypointTigger "element crossed top of window")
+        , Waypoints.enteredBottom "element1" (WaypointTigger "element entered bottom of window")
+        , Waypoints.exitedBottom "element1" (WaypointTigger "element exited bottom of window")
+        , Waypoints.crossedBottom "element1" (WaypointTigger "elemented crossed bottom of window")
+        ]
 
 
 view : Model -> Html Msg

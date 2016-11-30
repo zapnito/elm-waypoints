@@ -110,7 +110,10 @@ messageElementId messageId =
 subscriptions model =
     let
         messageWaypoint mention =
-            Waypoints.enteredView (messageElementId mention) (MessageRead mention)
+            Sub.batch
+                [ Waypoints.crossedTop (messageElementId mention) (MessageRead mention)
+                , Waypoints.crossedBottom (messageElementId mention) (MessageRead mention)
+                ]
     in
         model.mentions
             |> Set.toList

@@ -122,12 +122,13 @@ type alias State msg =
     { subs : List (MySub msg)
     , isScrollListenerEnabled : Bool
     , previousPosition : Position
+    , previousScrollEventTimeStamp : Float
     }
 
 
 type Msg
     = Update
-    | Scroll Position
+    | Scroll ScrollEvent
 
 
 init : Task Never (State msg)
@@ -136,6 +137,7 @@ init =
         { subs = []
         , isScrollListenerEnabled = False
         , previousPosition = DomHelpers.scrollPosition ()
+        , previousScrollEventTimeStamp = 0
         }
 
 
@@ -167,16 +169,29 @@ startScrollListener router =
     Process.spawn
         (Dom.onDocument
             "scroll"
-            scrollDecoder
-            (\position -> Platform.sendToSelf router (Scroll position))
+            scrollEventDecoder
+            (\scrollEvent -> Platform.sendToSelf router (Scroll scrollEvent))
         )
 
 
-scrollDecoder : Decoder Position
-scrollDecoder =
+scrollEventDecoder : Decoder ScrollEvent
+scrollEventDecoder =
+    JD.map2 ScrollEvent
+        (JD.at [ "target", "defaultView" ] scrollPositionDecoder)
+        (JD.field "timeStamp" JD.float)
+
+
+scrollPositionDecoder : Decoder Position
+scrollPositionDecoder =
     JD.map2 Position
-        (JD.at [ "target", "defaultView", "scrollX" ] JD.float)
-        (JD.at [ "target", "defaultView", "scrollY" ] JD.float)
+        (JD.field "scrollX" JD.float)
+        (JD.field "scrollY" JD.float)
+
+
+type alias ScrollEvent =
+    { position : Position
+    , timeStamp : Float
+    }
 
 
 onSelfMsg : Platform.Router msg Msg -> Msg -> State msg -> Task Never (State msg)
@@ -191,9 +206,20 @@ onSelfMsg router selfMsg state =
                 callbackEffects
                     |> Task.map (always state)
 
-            Scroll position ->
-                callbackEffects
-                    |> Task.map (always <| { state | previousPosition = position })
+            Scroll scrollEvent ->
+                if shouldThrottle state.previousScrollEventTimeStamp scrollEvent.timeStamp then
+                    Debug.log "throttling" (Task.succeed state)
+                else
+                    callbackEffects
+                        |> Task.map (always <| { state | previousPosition = scrollEvent.position, previousScrollEventTimeStamp = scrollEvent.timeStamp })
+
+
+shouldThrottle previous current =
+    current - previous < scrollThrottlePeriodMs
+
+
+scrollThrottlePeriodMs =
+    50
 
 
 buildCallbackEffects : Position -> Position -> List (MySub msg) -> List msg

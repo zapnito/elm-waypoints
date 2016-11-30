@@ -27,12 +27,12 @@ update msg model =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ Waypoints.enteredTop "element1" (WaypointTigger "element entered top of window")
-        , Waypoints.exitedTop "element1" (WaypointTigger "element exited top of window")
-        , Waypoints.crossedTop "element1" (WaypointTigger "element crossed top of window")
-        , Waypoints.enteredBottom "element1" (WaypointTigger "element entered bottom of window")
-        , Waypoints.exitedBottom "element1" (WaypointTigger "element exited bottom of window")
-        , Waypoints.crossedBottom "element1" (WaypointTigger "elemented crossed bottom of window")
+        [ Waypoints.enteredTop "element1" (WaypointTriggered "element entered top of window")
+        , Waypoints.exitedTop "element1" (WaypointTriggered "element exited top of window")
+        , Waypoints.crossedTop "element1" (WaypointTriggered "element crossed top of window")
+        , Waypoints.enteredBottom "element1" (WaypointTriggered "element entered bottom of window")
+        , Waypoints.exitedBottom "element1" (WaypointTriggered "element exited bottom of window")
+        , Waypoints.crossedBottom "element1" (WaypointTriggered "elemented crossed bottom of window")
         ]
 
 

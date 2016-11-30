@@ -36,7 +36,3 @@ view model =
 
 See https://github.com/zapnito/elm-waypoints/tree/master/examples for a working example.
 
-
-## TODO
-
-Add an `Offset` option so that events can be triggered before an element enters the view, useful for infinite loading

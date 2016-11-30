@@ -1,17 +1,8 @@
-module DomHelpers exposing (getBoundingClientRect, getWindowHeight, BoundingClientRect, waitForRender)
+module Waypoints.Internal.DomHelpers exposing (getBoundingClientRect, getWindowHeight, waitForRender, scrollPosition)
 
 import Native.DomHelpers
 import Json.Decode as JD exposing (Decoder)
-
-
-type alias BoundingClientRect =
-    { top : Float
-    , right : Float
-    , bottom : Float
-    , left : Float
-    , width : Float
-    , height : Float
-    }
+import Waypoints.Internal.Types exposing (Position, BoundingClientRect)
 
 
 getBoundingClientRect : String -> Result String BoundingClientRect
@@ -39,3 +30,8 @@ getWindowHeight =
 waitForRender : () -> Platform.Task x ()
 waitForRender () =
     Native.DomHelpers.waitForRender ()
+
+
+scrollPosition : () -> Position
+scrollPosition () =
+    Native.DomHelpers.scrollPosition ()

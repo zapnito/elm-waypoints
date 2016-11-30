@@ -3,6 +3,7 @@ module WaypointsExample exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Set
 import Waypoints
 
 
@@ -87,4 +88,4 @@ subscriptions model =
         elementId =
             "elem" ++ (toString model.currentElement)
     in
-        Waypoints.enteredView elementId (Appeared elementId)
+        Waypoints.crossedTop elementId (Appeared elementId)

@@ -1,51 +1,141 @@
-effect module Waypoints where { subscription = MySub } exposing (..)
+effect module Waypoints
+    where { subscription = MySub }
+    exposing
+        ( enteredTop
+        , exitedTop
+        , crossedTop
+        , enteredBottom
+        , exitedBottom
+        , crossedBottom
+        )
 
 import Task exposing (Task)
 import Dict exposing (Dict)
 import Dom.LowLevel as Dom
 import Json.Decode as JD exposing (Decoder)
 import Process
-import DomHelpers
+import Waypoints.Internal.Helpers exposing (..)
+import Waypoints.Internal.Types exposing (..)
+import Waypoints.Internal.DomHelpers as DomHelpers
 
 
+{-| This library lets you respond when elements scroll in/out of view
+# Subscriptions
+@docs enteredTop, exitedTop, crossedTop, enteredBottom, exitedBottom, crossedBottom
+-}
 type MySub msg
-    = EnteredView String msg
+    = Waypoint Edge Transition String msg
 
 
 subMap : (a -> b) -> MySub a -> MySub b
 subMap func sub =
     case sub of
-        EnteredView elementId tagger ->
-            EnteredView elementId (func tagger)
+        Waypoint edge transition elementId tagger ->
+            Waypoint edge transition elementId (func tagger)
 
 
-enteredView elementId tagger =
-    subscription (EnteredView elementId tagger)
+{-| Subscribe to when a waypoint enters from the top of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.enteredTop "elementId123" WaypointHit
+-}
+enteredTop : String -> msg -> Sub msg
+enteredTop elementId tagger =
+    subscription (Waypoint Top Entered elementId tagger)
+
+
+{-| Subscribe to when a waypoint exits the top of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.exitedTop "elementId123" WaypointHit
+-}
+exitedTop : String -> msg -> Sub msg
+exitedTop elementId tagger =
+    subscription (Waypoint Top Exited elementId tagger)
+
+
+{-| Subscribe to when a waypoint crosses the top of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.crossedTop "elementId123" WaypointHit
+-}
+crossedTop : String -> msg -> Sub msg
+crossedTop elementId tagger =
+    subscription (Waypoint Top Crossed elementId tagger)
+
+
+{-| Subscribe to when a waypoint enters from the bottom of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.enteredBottom "elementId123" WaypointHit
+-}
+enteredBottom : String -> msg -> Sub msg
+enteredBottom elementId tagger =
+    subscription (Waypoint Bottom Exited elementId tagger)
+
+
+{-| Subscribe to when a waypoint exits the bottom of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.exitedBottom "elementId123" WaypointHit
+-}
+exitedBottom : String -> msg -> Sub msg
+exitedBottom elementId tagger =
+    subscription (Waypoint Bottom Entered elementId tagger)
+
+
+{-| Subscribe to when a waypoint crosses the bottom of the window
+
+     import Waypoints
+
+     type Msg = WaypointHit | ...
+
+     subscriptions model =
+        Waypoints.crossedBottom "elementId123" WaypointHit
+-}
+crossedBottom : String -> msg -> Sub msg
+crossedBottom elementId tagger =
+    subscription (Waypoint Bottom Crossed elementId tagger)
 
 
 type alias State msg =
-    { enteredViewSubs : Dict String (List msg)
-    , elementStatuses : Dict String ElementVisibility
+    { subs : List (MySub msg)
     , isScrollListenerEnabled : Bool
+    , previousPosition : Position
     }
-
-
-type ElementVisibility
-    = Hidden
-    | Visible
-    | NotFound
 
 
 type Msg
     = Update
+    | Scroll Position
 
 
 init : Task Never (State msg)
 init =
     Task.succeed
-        { enteredViewSubs = Dict.empty
-        , elementStatuses = Dict.empty
+        { subs = []
         , isScrollListenerEnabled = False
+        , previousPosition = DomHelpers.scrollPosition ()
         }
 
 
@@ -64,7 +154,7 @@ onEffects router subs state =
                     |> Task.map (always { state | isScrollListenerEnabled = True })
 
         updatedState =
-            { state | enteredViewSubs = buildSubscriptions subs }
+            { state | subs = subs }
     in
         ensureScrollListenerIsEnabled
             |> Task.andThen (always <| DomHelpers.waitForRender ())
@@ -72,109 +162,83 @@ onEffects router subs state =
             |> Task.map (always updatedState)
 
 
+startScrollListener : Platform.Router msg Msg -> Task Never Process.Id
 startScrollListener router =
     Process.spawn
         (Dom.onDocument
             "scroll"
-            (JD.succeed True)
-            (always <| Platform.sendToSelf router Update)
+            scrollDecoder
+            (\position -> Platform.sendToSelf router (Scroll position))
         )
 
 
-buildSubscriptions : List (MySub msg) -> Dict String (List msg)
-buildSubscriptions subs =
-    let
-        flatten sub =
-            case sub of
-                EnteredView elementId tagger ->
-                    ( elementId, tagger )
-
-        addTagger tagger maybeList =
-            Just <|
-                case maybeList of
-                    Just list ->
-                        tagger :: list
-
-                    Nothing ->
-                        [ tagger ]
-
-        groupByElementId ( elementId, tagger ) groups =
-            groups |> Dict.update elementId (addTagger tagger)
-    in
-        subs
-            |> List.map flatten
-            |> List.foldl groupByElementId Dict.empty
+scrollDecoder : Decoder Position
+scrollDecoder =
+    JD.map2 Position
+        (JD.at [ "target", "defaultView", "scrollX" ] JD.float)
+        (JD.at [ "target", "defaultView", "scrollY" ] JD.float)
 
 
 onSelfMsg : Platform.Router msg Msg -> Msg -> State msg -> Task Never (State msg)
 onSelfMsg router selfMsg state =
-    case selfMsg of
-        Update ->
-            let
-                ( updatedElementStatuses, callbackEffects ) =
-                    updateElementStatuses
-                        router
-                        state.enteredViewSubs
-                        state.elementStatuses
-            in
-                callbackEffects
-                    |> Task.map (always <| { state | elementStatuses = updatedElementStatuses })
-
-
-updateElementStatuses :
-    Platform.Router msg Msg
-    -> Dict String (List msg)
-    -> Dict String ElementVisibility
-    -> ( Dict String ElementVisibility, Task x () )
-updateElementStatuses router enteredViewSubs elementStatuses =
     let
-        addElementStatus elementId =
-            Dict.insert elementId (visibilityOf elementId)
-
-        taggersFor elementId =
-            enteredViewSubs
-                |> Dict.get elementId
-                |> Maybe.withDefault []
-
-        updatedElementStatuses =
-            List.foldl
-                (\elementId statuses -> statuses |> Dict.insert elementId (visibilityOf elementId))
-                Dict.empty
-                (Dict.keys enteredViewSubs)
-
-        chainCallbackEffects elementId updatedElementStatus taskChain =
-            case ( elementStatuses |> Dict.get elementId, updatedElementStatus ) of
-                ( Just Visible, Visible ) ->
-                    taskChain
-
-                ( _, Visible ) ->
-                    taskChain
-                        |> Task.andThen (always <| sendAllToApp router (taggersFor elementId))
-
-                _ ->
-                    taskChain
+        callbackEffects =
+            buildCallbackEffects state.previousPosition (DomHelpers.scrollPosition ()) state.subs
+                |> sendAllToApp router
     in
-        ( updatedElementStatuses
-        , Dict.foldl chainCallbackEffects (Task.succeed ()) updatedElementStatuses
-        )
+        case selfMsg of
+            Update ->
+                callbackEffects
+                    |> Task.map (always state)
+
+            Scroll position ->
+                callbackEffects
+                    |> Task.map (always <| { state | previousPosition = position })
 
 
-visibilityOf elementId =
+buildCallbackEffects : Position -> Position -> List (MySub msg) -> List msg
+buildCallbackEffects previousPosition currentPosition subs =
     let
+        deltaY =
+            currentPosition.y - previousPosition.y
+
         windowHeight =
             DomHelpers.getWindowHeight ()
+
+        addCallbackEffect sub taggers =
+            case sub of
+                Waypoint edge transition elementId tagger ->
+                    if isWaypointHit edge transition elementId deltaY windowHeight then
+                        tagger :: taggers
+                    else
+                        taggers
     in
-        case DomHelpers.getBoundingClientRect elementId of
-            Ok { top } ->
-                if (0 < top) && (top < windowHeight) then
-                    Visible
-                else
-                    Hidden
-
-            Err message ->
-                NotFound
+        subs |> List.foldl addCallbackEffect []
 
 
+isWaypointHit : Edge -> Transition -> String -> Float -> Float -> Bool
+isWaypointHit edge transition elementId deltaY windowHeight =
+    case (DomHelpers.getBoundingClientRect elementId) of
+        Err _ ->
+            False
+
+        Ok boundingClientRect ->
+            let
+                currentWaypointTop =
+                    boundingClientRect.top
+
+                previousWaypointTop =
+                    currentWaypointTop - deltaY
+            in
+                Waypoints.Internal.Helpers.isWaypointHit
+                    edge
+                    transition
+                    currentWaypointTop
+                    previousWaypointTop
+                    windowHeight
+
+
+sendAllToApp : Platform.Router msg Msg -> List msg -> Task Never ()
 sendAllToApp router taggers =
     taggers
         |> List.map (Platform.sendToApp router)

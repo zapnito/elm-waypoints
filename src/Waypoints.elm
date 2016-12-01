@@ -27,7 +27,7 @@ enteredView elementId tagger =
 type alias State msg =
     { enteredViewSubs : Dict String (List msg)
     , elementStatuses : Dict String ElementVisibility
-    , isScrollListenerEnabled : Bool
+    , isActive : Bool
     , previousCheckAt : Maybe Time
     , lastThrottledAt : Time
     }
@@ -50,7 +50,7 @@ init =
     Task.succeed
         { enteredViewSubs = Dict.empty
         , elementStatuses = Dict.empty
-        , isScrollListenerEnabled = False
+        , isActive = False
         , previousCheckAt = Nothing
         , lastThrottledAt = 0
         }
@@ -62,19 +62,28 @@ onEffects :
     -> State msg
     -> Task Never (State msg)
 onEffects router subs state =
-    let
-        ensureScrollListenerIsEnabled =
-            if (not <| List.isEmpty subs) && not state.isScrollListenerEnabled then
-                startScrollListener router
-                    |> Task.map (always { state | isScrollListenerEnabled = True })
-            else
-                Task.succeed state
+    if (List.isEmpty subs) && not state.isActive then
+        Task.succeed state
+    else
+        Task.succeed state
+            |> Task.andThen (activateIfIdle router subs)
+            |> Task.andThen (handleOnEffects router subs)
 
+
+activateIfIdle router subs state =
+    if state.isActive then
+        Task.succeed state
+    else
+        startScrollListener router
+            |> Task.map (always { state | isActive = True })
+
+
+handleOnEffects router subs state =
+    let
         updatedState =
             { state | enteredViewSubs = buildSubscriptions subs }
     in
-        ensureScrollListenerIsEnabled
-            |> Task.andThen (always <| DomHelpers.waitForRender ())
+        DomHelpers.waitForRender ()
             |> Task.andThen (always <| Platform.sendToSelf router Updated)
             |> Task.map (always updatedState)
 

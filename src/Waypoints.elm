@@ -6,6 +6,7 @@ import Dom.LowLevel as Dom
 import Json.Decode as JD exposing (Decoder)
 import Process
 import DomHelpers
+import Time exposing (Time)
 
 
 type MySub msg
@@ -27,17 +28,21 @@ type alias State msg =
     { enteredViewSubs : Dict String (List msg)
     , elementStatuses : Dict String ElementVisibility
     , isScrollListenerEnabled : Bool
+    , previousCheckAt : Maybe Time
+    , lastThrottledAt : Time
     }
 
 
 type ElementVisibility
     = Hidden
     | Visible
-    | NotFound
+    | NotInDom
 
 
 type Msg
-    = Update
+    = Updated
+    | Scrolled ScrollEvent
+    | TrailingEdgeCheck Time
 
 
 init : Task Never (State msg)
@@ -46,6 +51,8 @@ init =
         { enteredViewSubs = Dict.empty
         , elementStatuses = Dict.empty
         , isScrollListenerEnabled = False
+        , previousCheckAt = Nothing
+        , lastThrottledAt = 0
         }
 
 
@@ -68,17 +75,28 @@ onEffects router subs state =
     in
         ensureScrollListenerIsEnabled
             |> Task.andThen (always <| DomHelpers.waitForRender ())
-            |> Task.andThen (always <| Platform.sendToSelf router Update)
+            |> Task.andThen (always <| Platform.sendToSelf router Updated)
             |> Task.map (always updatedState)
+
+
+type alias ScrollEvent =
+    { timeStamp : Time
+    }
 
 
 startScrollListener router =
     Process.spawn
         (Dom.onDocument
             "scroll"
-            (JD.succeed True)
-            (always <| Platform.sendToSelf router Update)
+            scrollEventDecoder
+            (\scrollEvent -> Platform.sendToSelf router (Scrolled scrollEvent))
         )
+
+
+scrollEventDecoder : Decoder ScrollEvent
+scrollEventDecoder =
+    JD.map ScrollEvent
+        (JD.field "timeStamp" JD.float)
 
 
 buildSubscriptions : List (MySub msg) -> Dict String (List msg)
@@ -108,17 +126,57 @@ buildSubscriptions subs =
 
 onSelfMsg : Platform.Router msg Msg -> Msg -> State msg -> Task Never (State msg)
 onSelfMsg router selfMsg state =
-    case selfMsg of
-        Update ->
+    let
+        applyUpdate func =
             let
                 ( updatedElementStatuses, callbackEffects ) =
                     updateElementStatuses
                         router
                         state.enteredViewSubs
                         state.elementStatuses
+
+                updatedState =
+                    func { state | elementStatuses = updatedElementStatuses }
             in
                 callbackEffects
-                    |> Task.map (always <| { state | elementStatuses = updatedElementStatuses })
+                    |> Task.map (always updatedState)
+    in
+        case selfMsg of
+            Updated ->
+                applyUpdate identity
+
+            Scrolled { timeStamp } ->
+                if shouldThrottle state.previousCheckAt timeStamp then
+                    scheduleSendToSelf router (TrailingEdgeCheck timeStamp)
+                        |> Task.map (always { state | lastThrottledAt = timeStamp })
+                else
+                    applyUpdate (\state -> { state | previousCheckAt = Just timeStamp })
+
+            TrailingEdgeCheck time ->
+                if time == state.lastThrottledAt && (Just time) /= state.previousCheckAt then
+                    applyUpdate (\state -> { state | previousCheckAt = Just time })
+                else
+                    (Task.succeed state)
+
+
+scheduleSendToSelf router tagger =
+    Process.sleep scrollThrottlePeriodMs
+        |> Task.andThen (always <| Platform.sendToSelf router tagger)
+        |> Process.spawn
+
+
+shouldThrottle : Maybe Time -> Time -> Bool
+shouldThrottle maybePrevious current =
+    case maybePrevious of
+        Nothing ->
+            False
+
+        Just previous ->
+            current - previous < scrollThrottlePeriodMs
+
+
+scrollThrottlePeriodMs =
+    50
 
 
 updateElementStatuses :
@@ -178,7 +236,7 @@ visibilityOf elementId =
                     Hidden
 
             Err message ->
-                NotFound
+                NotInDom
 
 
 elementCallbackEffects router elementTaggers =

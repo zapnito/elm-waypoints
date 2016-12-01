@@ -64,11 +64,11 @@ onEffects :
 onEffects router subs state =
     let
         ensureScrollListenerIsEnabled =
-            if state.isScrollListenerEnabled then
-                Task.succeed state
-            else
+            if (not <| List.isEmpty subs) && not state.isScrollListenerEnabled then
                 startScrollListener router
                     |> Task.map (always { state | isScrollListenerEnabled = True })
+            else
+                Task.succeed state
 
         updatedState =
             { state | enteredViewSubs = buildSubscriptions subs }

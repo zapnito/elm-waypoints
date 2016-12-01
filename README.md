@@ -10,7 +10,7 @@ Waypoints are elements on your page that you want to know about when they enter 
 
 ## Install
 
-As this is an effect manager and uses native code it isn't available at http://package.elm-lang.org. Instead you'll need to use https://github.com/gdotdesign/elm-github-install. Just add `"zapnito/elm-waypoints": "0.1.0 <= v < 1.0.0"`  to your elm-package.json as usual then run `$ elm-github-install`.
+As this is an effect manager and uses native code it isn't available at http://package.elm-lang.org. Instead you'll need to use https://github.com/gdotdesign/elm-github-install. Just add `"zapnito/elm-waypoints": "0.2.0 <= v < 1.0.0"`  to your elm-package.json as usual then run `$ elm-github-install`.
 
 
 ## Usage

@@ -1,5 +1,5 @@
 {
-    "version": "0.1.0",
+    "version": "0.2.0",
     "summary": "effect manager for waypoints",
     "repository": "https://github.com/zapnito/elm-waypoints.git",
     "license": "BSD3",

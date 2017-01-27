@@ -34,8 +34,8 @@ type alias State msg =
 
 
 type ElementVisibility
-    = Hidden
-    | Visible
+    = Offscreen
+    | OnScreen
     | NotInDom
 
 
@@ -215,10 +215,10 @@ updateElementStatuses router enteredViewSubs elementStatuses =
                 |> Dict.foldl
                     (\elementId updatedElementStatus taskChain ->
                         case ( elementStatuses |> Dict.get elementId, updatedElementStatus ) of
-                            ( Just Visible, Visible ) ->
+                            ( Just OnScreen, OnScreen ) ->
                                 taskChain
 
-                            ( _, Visible ) ->
+                            ( _, OnScreen ) ->
                                 taskChain
                                     |> Task.andThen (always <| elementCallbackEffects router (taggersFor elementId))
 
@@ -240,9 +240,9 @@ visibilityOf elementId =
         case DomHelpers.getBoundingClientRect elementId of
             Ok { top } ->
                 if (0 < top) && (top < windowHeight) then
-                    Visible
+                    OnScreen
                 else
-                    Hidden
+                    Offscreen
 
             Err message ->
                 NotInDom

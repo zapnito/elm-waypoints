@@ -7,10 +7,12 @@ import Json.Decode as JD exposing (Decoder)
 import Process
 import DomHelpers
 import Time exposing (Time)
+import DefaultDict exposing (DefaultDict)
 
 
 type MySub msg
     = EnteredView String msg
+    | ExitedView String msg
 
 
 subMap : (a -> b) -> MySub a -> MySub b
@@ -19,17 +21,30 @@ subMap func sub =
         EnteredView elementId tagger ->
             EnteredView elementId (func tagger)
 
+        ExitedView elementId tagger ->
+            ExitedView elementId (func tagger)
+
 
 enteredView elementId tagger =
     subscription (EnteredView elementId tagger)
 
 
+exitedView elementId tagger =
+    subscription (ExitedView elementId tagger)
+
+
 type alias State msg =
-    { enteredViewSubs : Dict String (List msg)
+    { subscriptions : Subscriptions msg
     , elementStatuses : Dict String ElementVisibility
     , isActive : Bool
     , previousCheckAt : Maybe Time
     , lastThrottledAt : Time
+    }
+
+
+type alias Subscriptions msg =
+    { enteredView : DefaultDict String (List msg)
+    , exitedView : DefaultDict String (List msg)
     }
 
 
@@ -48,12 +63,19 @@ type Msg
 init : Task Never (State msg)
 init =
     Task.succeed
-        { enteredViewSubs = Dict.empty
+        { subscriptions = initSubscriptions
         , elementStatuses = Dict.empty
         , isActive = False
         , previousCheckAt = Nothing
         , lastThrottledAt = 0
         }
+
+
+initSubscriptions : Subscriptions msg
+initSubscriptions =
+    { enteredView = DefaultDict.empty []
+    , exitedView = DefaultDict.empty []
+    }
 
 
 onEffects :
@@ -81,7 +103,7 @@ activateIfIdle router subs state =
 handleOnEffects router subs state =
     let
         updatedState =
-            { state | enteredViewSubs = buildSubscriptions subs }
+            { state | subscriptions = buildSubscriptions subs }
     in
         DomHelpers.waitForRender ()
             |> Task.andThen (always <| Platform.sendToSelf router Updated)
@@ -108,29 +130,25 @@ scrollEventDecoder =
         (JD.field "timeStamp" JD.float)
 
 
-buildSubscriptions : List (MySub msg) -> Dict String (List msg)
+buildSubscriptions : List (MySub msg) -> Subscriptions msg
 buildSubscriptions subs =
     let
-        flatten sub =
+        addSubscription sub subscriptions =
             case sub of
                 EnteredView elementId tagger ->
-                    ( elementId, tagger )
+                    { subscriptions
+                        | enteredView =
+                            DefaultDict.update elementId (\taggers -> Just (tagger :: taggers)) subscriptions.enteredView
+                    }
 
-        addTagger tagger maybeList =
-            Just <|
-                case maybeList of
-                    Just list ->
-                        tagger :: list
-
-                    Nothing ->
-                        [ tagger ]
-
-        groupByElementId ( elementId, tagger ) groups =
-            groups |> Dict.update elementId (addTagger tagger)
+                ExitedView elementId tagger ->
+                    { subscriptions
+                        | exitedView =
+                            DefaultDict.update elementId (\taggers -> Just (tagger :: taggers)) subscriptions.exitedView
+                    }
     in
         subs
-            |> List.map flatten
-            |> List.foldl groupByElementId Dict.empty
+            |> List.foldl addSubscription initSubscriptions
 
 
 onSelfMsg : Platform.Router msg Msg -> Msg -> State msg -> Task Never (State msg)
@@ -141,7 +159,7 @@ onSelfMsg router selfMsg state =
                 ( updatedElementStatuses, callbackEffects ) =
                     updateElementStatuses
                         router
-                        state.enteredViewSubs
+                        state.subscriptions
                         state.elementStatuses
 
                 updatedState =
@@ -190,25 +208,32 @@ scrollThrottlePeriodMs =
 
 updateElementStatuses :
     Platform.Router msg Msg
-    -> Dict String (List msg)
+    -> Subscriptions msg
     -> Dict String ElementVisibility
     -> ( Dict String ElementVisibility, Task x () )
-updateElementStatuses router enteredViewSubs elementStatuses =
+updateElementStatuses router subscriptions elementStatuses =
     let
         addElementStatus elementId =
             Dict.insert elementId (visibilityOf elementId)
 
-        taggersFor elementId =
-            enteredViewSubs
-                |> Dict.get elementId
-                |> Maybe.withDefault []
+        allElementIds =
+            (DefaultDict.keys subscriptions.enteredView) ++ (DefaultDict.keys subscriptions.exitedView)
 
         updatedElementStatuses =
-            enteredViewSubs
-                |> Dict.keys
-                |> List.foldl
-                    (\elementId statuses -> statuses |> Dict.insert elementId (visibilityOf elementId))
-                    Dict.empty
+            List.foldl
+                (\elementId statuses -> statuses |> Dict.insert elementId (visibilityOf elementId))
+                Dict.empty
+                allElementIds
+
+        enteredViewtaggersFor elementId =
+            subscriptions.enteredView |> DefaultDict.get elementId
+
+        exitedViewtaggersFor elementId =
+            subscriptions.exitedView |> DefaultDict.get elementId
+
+        fireTaggers taggers taskChain =
+            taskChain
+                |> Task.andThen (always <| elementCallbackEffects router taggers)
 
         callbackEffects =
             updatedElementStatuses
@@ -219,8 +244,10 @@ updateElementStatuses router enteredViewSubs elementStatuses =
                                 taskChain
 
                             ( _, OnScreen ) ->
-                                taskChain
-                                    |> Task.andThen (always <| elementCallbackEffects router (taggersFor elementId))
+                                taskChain |> fireTaggers (enteredViewtaggersFor elementId)
+
+                            ( Just OnScreen, Offscreen ) ->
+                                taskChain |> fireTaggers (exitedViewtaggersFor elementId)
 
                             _ ->
                                 taskChain
